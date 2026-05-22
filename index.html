@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>포토부스 위치 공유 서비스</title>
     <style>
-        /* 기본 스타일 초기화 */
         body, html {
             margin: 0;
             padding: 0;
@@ -18,8 +17,9 @@
             flex-direction: column;
             width: 100%;
             height: 100%;
+            position: relative;
         }
-        /* 기획서 기능 2: 3개 탭 메뉴 디자인 */
+        /* 기획서 기능 2: 탭 메뉴 스타일 */
         .tab-menu {
             display: flex;
             background-color: #f1f3f5;
@@ -38,7 +38,6 @@
         .tab-item:hover {
             background-color: #e9ecef;
         }
-        /* 활성화된 현재 탭 스타일 */
         .tab-item.active {
             background-color: #ffffff;
             color: #212529;
@@ -50,7 +49,25 @@
             width: 100%;
             height: 100%;
         }
-        /* 인포윈도우 커스텀 CSS */
+        /* 주변 검색 알림창 및 내 위치 버튼 스타일 */
+        .map-overlay-btn {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 10;
+            background-color: #ffffff;
+            border: 1px solid #ccc;
+            padding: 10px 15px;
+            font-size: 13px;
+            font-weight: bold;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+        .map-overlay-btn:hover {
+            background-color: #f8f9fa;
+        }
+        /* 인포윈도우 디자인 */
         .info-window {
             padding: 10px;
             font-size: 13px;
@@ -82,41 +99,53 @@
     </div>
 
     <div id="map"></div>
+
+    <button class="map-overlay-btn" onclick="getCurrentLocation()">📍 내 위치 찾기</button>
 </div>
 
 <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=11139f5892d2f841101bacbbd23d00de&libraries=services"></script>
 <script>
-    // 전역 변수 선언
+    // 전역 변수 설정
     let map;
     let placeService;
-    let currentMarkers = []; // 지도에 렌더링된 마커를 담는 배열
-    let activeInfoWindow = null; // 현재 화면에 띄워진 인포윈도우 객체
+    let currentMarkers = []; 
+    let activeInfoWindow = null; 
+    let currentSelectedBrand = '포토이즘'; // 현재 선택된 브랜드 키워드 기억
+    let currentSelectedCategory = '문화,예술 > 문화시설 > 사진관,스튜디오'; // 현재 선택된 카테고리 코드 명칭 기억
 
-    // 앱 실행 시(페이지 로딩 완료 시) 즉시 구동
+    // 페이지 로드 시 실행
     window.onload = function() {
-        // 카카오 API 정상 로드 여부 검증 안전장치
         if (typeof kakao === 'undefined' || !kakao.maps) {
-            alert("카카오 맵 API를 불러오지 못했습니다. 앱 키와 플랫폼 도메인 설정을 확인하세요.");
+            alert("카카오 맵 API 로드 실패! 키 설정이나 도메인 등록을 확인해봐.");
             return;
         }
-        initializeMapAndLocation();
+        initMap();
     };
 
-    // 기획서 기능 4: 앱 시작 시 기본 지도 설정 및 위치 서비스 활성화 함수
-    function initializeMapAndLocation() {
+    // 지도 초기화 함수
+    function initMap() {
         const mapContainer = document.getElementById('map');
-        const defaultPosition = new kakao.maps.LatLng(37.566826, 126.9786567); // 위치 권한 거부 시 띄울 기본 중심 (서울시청)
+        const defaultPosition = new kakao.maps.LatLng(37.566826, 126.9786567); // 서울시청 기본값
         
         const mapOptions = {
             center: defaultPosition, 
-            level: 4 // 지도 확대 수준 (포토부스 확인하기 좋은 크기)
+            level: 4 
         };
 
-        // 지도 생성 및 검색 서비스 객체 초기화
         map = new kakao.maps.Map(mapContainer, mapOptions);
         placeService = new kakao.maps.services.Places();
 
-        // 기획서 기능 1 & 기능 4: 브라우저 위치 서비스를 활용해 사용자의 현재 좌표 가져오기
+        // [해결 대책 1] 지도를 드래그해서 멈췄을 때, 해당 중심점 기준으로 주변을 재검색하는 이벤트 추가!
+        kakao.maps.event.addListener(map, 'dragend', function() {
+            searchPhotoBooth(currentSelectedBrand, currentSelectedCategory);
+        });
+
+        // 기획서 기능 4: 앱 열자마자 현재 위치 서비스 시작
+        getCurrentLocation();
+    }
+
+    // 현재 위치를 추적하여 지도를 이동시키는 함수
+    function getCurrentLocation() {
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(
                 function(position) {
@@ -124,122 +153,124 @@
                     const longitude = position.coords.longitude;
                     const currentPosition = new kakao.maps.LatLng(latitude, longitude);
                     
-                    // 지도의 중심을 실시간 현재 내 위치로 이동시킴
+                    // 내 주변 위치로 중심 이동
                     map.setCenter(currentPosition);
                     
-                    // 현재 위치를 기반으로 첫 번째 탭(포토이즘) 자동 주변 탐색 시작
-                    searchPhotoBooth('포토이즘', '문화,예술 > 문화시설 > 사진관,스튜디오');
+                    // 중심 이동 후 자동으로 검색 실행
+                    searchPhotoBooth(currentSelectedBrand, currentSelectedCategory);
                 }, 
                 function(error) {
-                    // 사용자가 위치 권한을 거부했거나 GPS 연결 오류 시 안내 후 기본 위치 검색
-                    console.warn("현재 위치 정보를 가져올 수 없어 기본 좌표로 포토부스를 검색합니다.");
-                    searchPhotoBooth('포토이즘', '문화,예술 > 문화시설 > 사진관,스튜디오');
+                    // GPS 허용을 안 했거나 오류가 나면 콘솔에 띄우고 기본 위치에서 검색 진행
+                    console.warn("GPS 호출에 실패했습니다. 지도를 움직여서 주변을 탐색해 보세요.");
+                    searchPhotoBooth(currentSelectedBrand, currentSelectedCategory);
                 }
             );
         } else {
-            // 브라우저 자체가 위치 서비스를 지원하지 않는 구형 브라우저일 때
-            searchPhotoBooth('포토이즘', '문화,예술 > 문화시설 > 사진관,스튜디오');
+            searchPhotoBooth(currentSelectedBrand, currentSelectedCategory);
         }
     }
 
-    // 탭 전환 처리 및 마커 제어 함수
+    // 탭 전환 함수
     function switchTab(element, brandKeyword, categoryCode) {
-        // 모든 탭의 active 클래스 초기화 후 선택한 탭 활성화
         const tabs = document.querySelectorAll('.tab-item');
         tabs.forEach(tab => tab.classList.remove('active'));
         element.classList.add('active');
 
-        // 지시사항 반영: 탭 전환 시 기존 화면의 마커와 열려있던 윈도우를 깨끗하게 청소
+        // 상태값 저장
+        currentSelectedBrand = brandKeyword;
+        currentSelectedCategory = categoryCode;
+
+        // 기존 마커 청소
         clearMarkers();
         if (activeInfoWindow) {
             activeInfoWindow.close();
         }
 
-        // 바뀐 브랜드 키워드와 카테고리 정보로 주변 재검색
+        // 검색 실행
         searchPhotoBooth(brandKeyword, categoryCode);
     }
 
-    // 포토부스 위치 검색 요청 함수
+    // 주변 포토부스 위치 검색 함수
     function searchPhotoBooth(keyword, categoryCode) {
-        // 현재 설정되어 있는 지도 화면의 중심점을 획득
+        // [해결 대책 2] 현재 보고 있는 지도 화면의 '중심점'을 실시간으로 획득
         const currentCenter = map.getCenter();
         
-        // 내 위치 주변 반경 2km 이내 조건 설정
+        // 반경을 기존 2km에서 5km(5000)로 넓혀서 더 넓은 주변을 찾아주도록 개선!
         const searchOptions = {
             location: currentCenter,
-            radius: 2000
+            radius: 5000
         };
 
-        // 카카오맵 키워드 검색 수행 및 익명 콜백 함수로 카테고리 인자 넘겨주기
+        // 카카오 키워드 검색 수행
         placeService.keywordSearch(keyword, function(data, status, pagination) {
             processSearchResults(data, status, pagination, categoryCode);
         }, searchOptions);
     }
 
-    // 검색된 데이터 처리 및 카테고리 필터링 콜백 함수
+    // 검색 결과 콜백 함수
     function processSearchResults(data, status, pagination, categoryCode) {
+        // 기존 마커를 한 번 지워주고 새로 그려야 매끄럽게 전환돼
+        clearMarkers();
+
         if (status === kakao.maps.services.Status.OK) {
+            let foundCount = 0;
             for (let i = 0; i < data.length; i++) {
-                // 가져온 장소 데이터의 내부 카테고리가 '사진관,스튜디오' 코드가 맞는지 최종 필터 검사
+                // 내부 카테고리 매칭 검사
                 if (data[i].category_name.includes(categoryCode)) {
                     createPhotoBoothMarker(data[i]);
+                    foundCount++;
                 }
             }
+            console.log(`${currentSelectedBrand} 주변 매장 ${foundCount}개 발견!`);
         } else if (status === kakao.maps.services.Status.ZERO_RESULT) {
-            console.log('선택하신 포토부스가 주변 2km 반경 안에 존재하지 않습니다.');
-        } else if (status === kakao.maps.services.Status.ERROR) {
-            alert('위치 기반 장소 검색 중 시스템 에러가 발생했습니다.');
+            // 알림창(alert)을 계속 띄우면 사용이 불편하므로, 콘솔로그로 대체하고 지도를 움직이도록 유도해
+            console.log('현재 지도 중심 주변 5km 이내에 매장이 없습니다. 지도를 이동해 보세요.');
         }
     }
 
-    // 마커 렌더링 및 인포윈도우(대기 인원) 바인딩 함수
+    // 마커 및 정보창 생성 함수
     function createPhotoBoothMarker(place) {
         const markerPosition = new kakao.maps.LatLng(place.y, place.x);
         
-        // 지도 위에 마커 객체 배치
         const marker = new kakao.maps.Marker({
             map: map,
             position: markerPosition
         });
 
-        // 탭 리셋 시 추적할 수 있도록 전역 마커 배열에 누적 보관
         currentMarkers.push(marker);
 
-        // 기획서 기능 3: 포토부스 대기 인원 정보 생성 (프로토타입용 0~4팀 실시간 가상 생성)
+        // 기획서 기능 3: 대기 인원 랜덤 생성
         const waitingTeams = Math.floor(Math.random() * 5); 
 
-        // 말풍선 인포윈도우 내부 레이아웃 설계
         const infoContent = `
             <div class="info-window">
                 <div class="info-title">${place.place_name}</div>
                 <div class="info-category">분류: 사진관,스튜디오</div>
-                <div>거리: 내 주변 약 ${place.distance ? place.distance + 'm' : '계산불가'}</div>
-                <div class="info-waiting">현재 대기 인원: ${waitingTeams}팀 🔥</div>
+                <div>거리: 중심에서 약 ${place.distance ? place.distance + 'm' : '확인불가'}</div>
+                <div class="info-waiting">현재 대기: ${waitingTeams}팀 🔥</div>
             </div>
         `;
 
         const infowindow = new kakao.maps.InfoWindow({
             content: infoContent,
-            removable: true // 닫기(X) 버튼 활성화
+            removable: true 
         });
 
-        // 마커를 마우스로 터치/클릭했을 때 상세 정보창 오픈 이벤트 등록
         kakao.maps.event.addListener(marker, 'click', function() {
-            // 다른 마커 정보창이 켜져 있다면 화면 정리 차원에서 닫기 처리
             if (activeInfoWindow) {
                 activeInfoWindow.close();
             }
             infowindow.open(map, marker);
-            activeInfoWindow = infowindow; // 현재 활성화된 정보창으로 등록
+            activeInfoWindow = infowindow; 
         });
     }
 
-    // 화면 초기화를 위한 기존 마커 일괄 제거 함수
+    // 마커 삭제 함수
     function clearMarkers() {
         for (let i = 0; i < currentMarkers.length; i++) {
-            currentMarkers[i].setMap(null); // 지도 가시성 끄기
+            currentMarkers[i].setMap(null);
         }
-        currentMarkers = []; // 배열 비우기
+        currentMarkers = []; 
     }
 </script>
 </body>
