@@ -49,7 +49,7 @@
             width: 100%;
             height: 100%;
         }
-        /* 주변 검색 알림창 및 내 위치 버튼 스타일 */
+        /* 내 위치 찾기 버튼 스타일 */
         .map-overlay-btn {
             position: absolute;
             bottom: 20px;
@@ -64,23 +64,16 @@
             cursor: pointer;
             box-shadow: 0 2px 6px rgba(0,0,0,0.2);
         }
-        .map-overlay-btn:hover {
-            background-color: #f8f9fa;
-        }
         /* 인포윈도우 디자인 */
         .info-window {
             padding: 10px;
             font-size: 13px;
             line-height: 1.5;
+            min-width: 150px;
         }
         .info-title {
             font-weight: bold;
             color: #1c7ed6;
-            margin-bottom: 4px;
-        }
-        .info-category {
-            font-size: 11px;
-            color: #868e96;
             margin-bottom: 4px;
         }
         .info-waiting {
@@ -93,14 +86,14 @@
 
 <div id="app-container">
     <div class="tab-menu">
-        <div class="tab-item active" onclick="switchTab(this, '포토이즘', '문화,예술 > 문화시설 > 사진관,스튜디오')">포토이즘</div>
-        <div class="tab-item" onclick="switchTab(this, '모노맨션', '문화,예술 > 문화시설 > 사진관,스튜디오')">모노맨션</div>
-        <div class="tab-item" onclick="switchTab(this, '포토그레이', '문화,예술 > 문화시설 > 사진관,스튜디오')">포토그레이</div>
+        <div class="tab-item active" onclick="switchTab(this, '포토이즘')">포토이즘</div>
+        <div class="tab-item" onclick="switchTab(this, '모노맨션')">모노맨션</div>
+        <div class="tab-item" onclick="switchTab(this, '포토그레이')">포토그레이</div>
     </div>
 
     <div id="map"></div>
 
-    <button class="map-overlay-btn" onclick="getCurrentLocation()">📍 내 위치 찾기</button>
+    <button class="map-overlay-btn" onclick="getCurrentLocation()">📍 내 위치 중심</button>
 </div>
 
 <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=11139f5892d2f841101bacbbd23d00de&libraries=services"></script>
@@ -108,15 +101,14 @@
     // 전역 변수 설정
     let map;
     let placeService;
-    let currentMarkers = []; 
-    let activeInfoWindow = null; 
-    let currentSelectedBrand = '포토이즘'; // 현재 선택된 브랜드 키워드 기억
-    let currentSelectedCategory = '문화,예술 > 문화시설 > 사진관,스튜디오'; // 현재 선택된 카테고리 코드 명칭 기억
+    let currentMarkers = []; // 현재 지도에 표시된 마커 배열
+    let activeInfoWindow = null; // 현재 열려있는 인포윈도우 객체
+    let currentSelectedBrand = '포토이즘'; // 현재 선택된 브랜드 키워드 저장용
 
-    // 페이지 로드 시 실행
+    // 페이지 로드 시 초기화 시작
     window.onload = function() {
         if (typeof kakao === 'undefined' || !kakao.maps) {
-            alert("카카오 맵 API 로드 실패! 키 설정이나 도메인 등록을 확인해봐.");
+            alert("카카오 맵 API 로드 실패! API 키나 플랫폼 도메인 설정을 확인해봐.");
             return;
         }
         initMap();
@@ -125,22 +117,22 @@
     // 지도 초기화 함수
     function initMap() {
         const mapContainer = document.getElementById('map');
-        const defaultPosition = new kakao.maps.LatLng(37.566826, 126.9786567); // 서울시청 기본값
+        const defaultPosition = new kakao.maps.LatLng(37.566826, 126.9786567); // 위치 실패 시 기본값 (서울시청)
         
         const mapOptions = {
             center: defaultPosition, 
-            level: 4 
+            level: 4 // 중심지가 잘 보이고 매장들이 한눈에 들어오는 축척 레벨
         };
 
         map = new kakao.maps.Map(mapContainer, mapOptions);
         placeService = new kakao.maps.services.Places();
 
-        // [해결 대책 1] 지도를 드래그해서 멈췄을 때, 해당 중심점 기준으로 주변을 재검색하는 이벤트 추가!
+        // 지도를 드래그해서 옮길 때마다 그 지역 주변의 브랜드 매장을 새로 고침하는 이벤트 등록
         kakao.maps.event.addListener(map, 'dragend', function() {
-            searchPhotoBooth(currentSelectedBrand, currentSelectedCategory);
+            searchPhotoBooth(currentSelectedBrand);
         });
 
-        // 기획서 기능 4: 앱 열자마자 현재 위치 서비스 시작
+        // 기획서 기능 4: 앱 시작하자마자 현재 내 위치 찾기 작동
         getCurrentLocation();
     }
 
@@ -153,78 +145,70 @@
                     const longitude = position.coords.longitude;
                     const currentPosition = new kakao.maps.LatLng(latitude, longitude);
                     
-                    // 내 주변 위치로 중심 이동
+                    // 내 진짜 주변 위치로 지도 이동
                     map.setCenter(currentPosition);
                     
-                    // 중심 이동 후 자동으로 검색 실행
-                    searchPhotoBooth(currentSelectedBrand, currentSelectedCategory);
+                    // 이동 후 현재 선택된 브랜드 검색 실행
+                    searchPhotoBooth(currentSelectedBrand);
                 }, 
                 function(error) {
-                    // GPS 허용을 안 했거나 오류가 나면 콘솔에 띄우고 기본 위치에서 검색 진행
-                    console.warn("GPS 호출에 실패했습니다. 지도를 움직여서 주변을 탐색해 보세요.");
-                    searchPhotoBooth(currentSelectedBrand, currentSelectedCategory);
+                    console.warn("GPS 호출에 실패하여 기본 위치에서 검색합니다. 지도를 움직여 보세요.");
+                    searchPhotoBooth(currentSelectedBrand);
                 }
             );
         } else {
-            searchPhotoBooth(currentSelectedBrand, currentSelectedCategory);
+            searchPhotoBooth(currentSelectedBrand);
         }
     }
 
-    // 탭 전환 함수
-    function switchTab(element, brandKeyword, categoryCode) {
+    // 탭 클릭 시 브랜드 전환 처리 함수
+    function switchTab(element, brandKeyword) {
+        // 모든 탭의 active 클래스 제거 후 선택된 탭 활성화
         const tabs = document.querySelectorAll('.tab-item');
         tabs.forEach(tab => tab.classList.remove('active'));
         element.classList.add('active');
 
-        // 상태값 저장
+        // 전역 브랜드 키워드 갱신
         currentSelectedBrand = brandKeyword;
-        currentSelectedCategory = categoryCode;
 
-        // 기존 마커 청소
+        // 지시사항 반영: 기존 마커 및 인포윈도우 완전히 정리
         clearMarkers();
         if (activeInfoWindow) {
             activeInfoWindow.close();
         }
 
-        // 검색 실행
-        searchPhotoBooth(brandKeyword, categoryCode);
+        // 바뀐 브랜드로 즉시 검색
+        searchPhotoBooth(brandKeyword);
     }
 
     // 주변 포토부스 위치 검색 함수
-    function searchPhotoBooth(keyword, categoryCode) {
-        // [해결 대책 2] 현재 보고 있는 지도 화면의 '중심점'을 실시간으로 획득
+    function searchPhotoBooth(keyword) {
+        // [핵심] 현재 내 눈에 보이는 지도 화면의 정중앙 좌표를 기준으로 탐색해
         const currentCenter = map.getCenter();
         
-        // 반경을 기존 2km에서 5km(5000)로 넓혀서 더 넓은 주변을 찾아주도록 개선!
+        // 반경을 5km(5000m)로 넉넉하게 잡아서 주변 매장을 놓치지 않게 조절
         const searchOptions = {
             location: currentCenter,
             radius: 5000
         };
 
         // 카카오 키워드 검색 수행
-        placeService.keywordSearch(keyword, function(data, status, pagination) {
-            processSearchResults(data, status, pagination, categoryCode);
-        }, searchOptions);
+        placeService.keywordSearch(keyword, placesSearchCallback, searchOptions);
     }
 
     // 검색 결과 콜백 함수
-    function processSearchResults(data, status, pagination, categoryCode) {
-        // 기존 마커를 한 번 지워주고 새로 그려야 매끄럽게 전환돼
+    function placesSearchCallback(data, status, pagination) {
+        // 탭이 바뀌거나 지도가 움직였으므로 기존 마커 삭제
         clearMarkers();
 
         if (status === kakao.maps.services.Status.OK) {
-            let foundCount = 0;
+            // [해결 포인트] 불확실한 카테고리 텍스트 매칭 검사를 없애고 검색된 브랜드를 그대로 마커로 변환!
             for (let i = 0; i < data.length; i++) {
-                // 내부 카테고리 매칭 검사
-                if (data[i].category_name.includes(categoryCode)) {
-                    createPhotoBoothMarker(data[i]);
-                    foundCount++;
-                }
+                createPhotoBoothMarker(data[i]);
             }
-            console.log(`${currentSelectedBrand} 주변 매장 ${foundCount}개 발견!`);
+            console.log(`${currentSelectedBrand} 매장 ${data.length}개 발견 완료!`);
         } else if (status === kakao.maps.services.Status.ZERO_RESULT) {
-            // 알림창(alert)을 계속 띄우면 사용이 불편하므로, 콘솔로그로 대체하고 지도를 움직이도록 유도해
-            console.log('현재 지도 중심 주변 5km 이내에 매장이 없습니다. 지도를 이동해 보세요.');
+            console.log(`현재 지도 중심 주변 5km 이내에 ${currentSelectedBrand} 매장이 없습니다.`);
         }
     }
 
@@ -232,21 +216,23 @@
     function createPhotoBoothMarker(place) {
         const markerPosition = new kakao.maps.LatLng(place.y, place.x);
         
+        // 마커 생성 및 지도 표시
         const marker = new kakao.maps.Marker({
             map: map,
             position: markerPosition
         });
 
+        // 탭 전환 시 지울 수 있도록 전역 마커 리스트에 저장
         currentMarkers.push(marker);
 
-        // 기획서 기능 3: 대기 인원 랜덤 생성
+        // 기획서 기능 3: 대기 인원 랜덤 가상 생성 (0~4팀)
         const waitingTeams = Math.floor(Math.random() * 5); 
 
+        // 인포윈도우 내부 레이아웃 설계
         const infoContent = `
             <div class="info-window">
                 <div class="info-title">${place.place_name}</div>
-                <div class="info-category">분류: 사진관,스튜디오</div>
-                <div>거리: 중심에서 약 ${place.distance ? place.distance + 'm' : '확인불가'}</div>
+                <div>거리: 약 ${place.distance ? place.distance + 'm' : '계산불가'}</div>
                 <div class="info-waiting">현재 대기: ${waitingTeams}팀 🔥</div>
             </div>
         `;
@@ -256,6 +242,7 @@
             removable: true 
         });
 
+        // 마커 클릭 시 정보 윈도우 오픈 이벤트
         kakao.maps.event.addListener(marker, 'click', function() {
             if (activeInfoWindow) {
                 activeInfoWindow.close();
@@ -265,7 +252,7 @@
         });
     }
 
-    // 마커 삭제 함수
+    // 화면의 모든 마커를 지우는 함수
     function clearMarkers() {
         for (let i = 0; i < currentMarkers.length; i++) {
             currentMarkers[i].setMap(null);
