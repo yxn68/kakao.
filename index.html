@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>포토부스 위치 검색 서비스</title>
+    <title>주변 포토부스 추천 서비스</title>
     <style>
-        /* 기본 스타일 초기화 */
+        /* 기본 레이아웃 구성 */
         body, html {
             margin: 0;
             padding: 0;
@@ -20,7 +20,7 @@
             height: 100%;
             position: relative;
         }
-        /* 검색창 영역 스타일 */
+        /* 상단 검색창 스타일 */
         .search-container {
             display: flex;
             padding: 15px;
@@ -49,18 +49,46 @@
             border: none;
             border-radius: 8px;
             cursor: pointer;
-            transition: background 0.2s;
         }
-        .search-button:hover {
-            background-color: #3182ce;
-        }
-        /* 지도 영역 */
+        /* 지도 레이아웃 */
         #map {
             flex: 1;
             width: 100%;
             height: 100%;
         }
-        /* 인포윈도우 디자인 */
+        /* 기획서 기능 1: 내 주변 추천 매장 리스트 오버레이 */
+        .recommend-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 10;
+            background-color: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 15px;
+            width: 280px;
+            max-height: 200px;
+            overflow-y: auto;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .recommend-title {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #333;
+            border-bottom: 2px solid #4dabf7;
+            padding-bottom: 4px;
+        }
+        .recommend-item {
+            font-size: 12px;
+            padding: 6px 0;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        .recommend-item:hover {
+            color: #1c7ed6;
+            font-weight: bold;
+        }
+        /* 인포윈도우 스타일 */
         .info-window {
             padding: 10px;
             font-size: 13px;
@@ -86,13 +114,18 @@
             type="text" 
             id="keyword-input" 
             class="search-input" 
-            placeholder="예: 홍대 포토이즘, 강남 모노맨션, 부평 포토그레이"
+            placeholder="동네나 포토부스 브랜드를 검색해 보세요"
             onkeypress="if(event.keyCode==13) executeSearch();"
         >
         <button class="search-button" onclick="executeSearch()">검색</button>
     </div>
 
     <div id="map"></div>
+
+    <div class="recommend-panel">
+        <div class="recommend-title">✨ 내 주변 포토부스 추천</div>
+        <div id="recommend-list">위치 정보를 불러오는 중...</div>
+    </div>
 </div>
 
 <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=11139f5892d2f841101bacbbd23d00de&libraries=services"></script>
@@ -100,98 +133,155 @@
     // 전역 변수 설정
     let map;
     let placeService;
-    let currentMarkers = []; // 화면에 찍힌 마커들을 관리하는 배열
-    let activeInfoWindow = null; // 현재 열려있는 정보창 객체
+    let currentMarkers = []; 
+    let activeInfoWindow = null; 
 
-    // 페이지 로드 시 실행되는 초기화 로직
     window.onload = function() {
         if (typeof kakao === 'undefined' || !kakao.maps) {
-            alert("카카오 맵 API 로드 실패! API 키나 개발자 센터 도메인 설정을 다시 확인해봐.");
+            alert("카카오 맵 API 로드 실패! API 키나 플랫폼 설정을 확인해 보세요.");
             return;
         }
         initMap();
     };
 
-    // 지도 초기 구성 함수
+    // 지도 및 기본 서비스 세팅
     function initMap() {
         const mapContainer = document.getElementById('map');
-        const defaultPosition = new kakao.maps.LatLng(37.566826, 126.9786567); // 기본 좌표 (서울시청)
+        const defaultPosition = new kakao.maps.LatLng(37.566826, 126.9786567); // 기본 위치 (서울시청)
         
         const mapOptions = {
             center: defaultPosition,
-            level: 3 // 검색 후 매장 위치가 상세하게 보이도록 확대 레벨을 3으로 설정
+            level: 4 
         };
 
         map = new kakao.maps.Map(mapContainer, mapOptions);
-        
-        // 장소 검색을 수행할 서비스 객체 생성
         placeService = new kakao.maps.services.Places();
+
+        // [기획서 기능 4 적용] 앱을 열면 즉시 현재 위치 서비스를 추적하여 주변 추천 시작
+        getRecommendationByLocation();
     }
 
-    // 검색창 엔터나 버튼 클릭 시 구동되는 메인 검색 함수
+    // 내 실시간 좌표를 가져와 주변 포토부스를 추천해 주는 함수
+    function getRecommendationByLocation() {
+        const listContainer = document.getElementById('recommend-list');
+
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    const currentPos = new kakao.maps.LatLng(lat, lon);
+                    
+                    // 지도를 내 진짜 현재 위치로 이동
+                    map.setCenter(currentPos);
+
+                    // 내 주변 반경 3km 내의 모든 '포토부스' 통합 검색 옵션 설정
+                    const searchOptions = {
+                        location: currentPos,
+                        radius: 3000,
+                        sort: kakao.maps.services.SortBy.DISTANCE // 가까운 거리순 정렬!
+                    };
+
+                    // 카카오 검색 엔진 가동
+                    placeService.keywordSearch('포토부스', function(data, status) {
+                        if (status === kakao.maps.services.Status.OK) {
+                            listContainer.innerHTML = ""; // 기존 대기 문구 삭제
+                            clearMarkers();
+
+                            // 상위 추천 매장 최대 5개 선정 및 마커 표기
+                            const maxRecommendations = Math.min(data.length, 5);
+                            for (let i = 0; i < data.length; i++) {
+                                const marker = createPhotoBoothMarker(data[i]);
+
+                                // 5등 안에 드는 가까운 매장은 왼쪽 아래 추천 패널 리스트에 추가
+                                if (i < maxRecommendations) {
+                                    const item = document.createElement('div');
+                                    item.className = 'recommend-item';
+                                    item.innerHTML = `<strong>[${i+1}등 추천]</strong> ${data[i].place_name} (${data[i].distance}m)`;
+                                    
+                                    // 추천 리스트 클릭 시 해당 마커 위치로 부드럽게 지도 이동하는 이벤트 바인딩
+                                    item.onclick = (function(m) {
+                                        return function() {
+                                            map.panTo(m.getPosition());
+                                        };
+                                    })(marker);
+                                    
+                                    listContainer.appendChild(item);
+                                }
+                            }
+                        } else {
+                            listContainer.innerHTML = "<div style='color:#999;'>주변 3km 내에 발견된 포토부스가 없습니다.</div>";
+                        }
+                    }, searchOptions);
+
+                },
+                function(error) {
+                    // 위치 수집 거부 시 기본값 안내
+                    listContainer.innerHTML = "<div style='color:#f03e3e;'>위치 권한이 거부되어 기본 주소(서울시청) 기준으로 검색합니다.</div>";
+                    executeDefaultRecommendation(defaultPosition);
+                }
+            );
+        } else {
+            listContainer.innerHTML = "이 브라우저는 위치 서비스를 지원하지 않습니다.";
+        }
+    }
+
+    // 위치 획득 실패 시 동작하는 기본 영역 추천 서브 로직
+    function executeDefaultRecommendation(pos) {
+        placeService.keywordSearch('포토부스', function(data, status) {
+            if (status === kakao.maps.services.Status.OK) {
+                for (let i = 0; i < Math.min(data.length, 5); i++) {
+                    createPhotoBoothMarker(data[i]);
+                }
+            }
+        }, { location: map.getCenter(), radius: 3000 });
+    }
+
+    // [검색창 전용 기능] 사용자가 상단 인풋에 직접 입력해 전국을 탐색할 때 쓰는 함수
     function executeSearch() {
         const inputElement = document.getElementById('keyword-input');
         const userKeyword = inputElement.value.trim();
 
-        // 빈 문자열 방지 예외 처리
         if (!userKeyword) {
-            alert('검색어를 입력해 주세요! (예: 홍대 포토이즘)');
+            alert('검색어를 입력하세요!');
             inputElement.focus();
             return;
         }
 
-        // 새로운 검색이 시작되므로 기존 마커와 인포윈도우 싹 청소
         clearMarkers();
         if (activeInfoWindow) {
             activeInfoWindow.close();
         }
 
-        // 카카오맵 키워드 검색 API 호출 (이번엔 위치 반경 제약 없이 전국 검색)
-        placeService.keywordSearch(userKeyword, placesSearchCallback);
-    }
-
-    // 카카오 서버에서 검색 결과를 돌려받았을 때 실행되는 콜백 함수
-    function placesSearchCallback(data, status, pagination) {
-        if (status === kakao.maps.services.Status.OK) {
-            
-            // 검색된 장소들의 위치를 모아서 지도를 한눈에 이동시킬 범위(Bounds) 객체 생성
-            const mapBounds = new kakao.maps.LatLngBounds();
-
-            // 검색 결과 배열을 돌며 마커 표시 및 범위 확장
-            for (let i = 0; i < data.length; i++) {
-                createPhotoBoothMarker(data[i]);
-                
-                // 해당 매장의 좌표를 지도 범위 객체에 추가
-                mapBounds.extend(new kakao.maps.LatLng(data[i].y, data[i].x));
+        // 검색창으로 검색할 때는 특정 반경 제약 없이 전국 카카오맵 매장 데이터를 긁어옴
+        placeService.keywordSearch(userKeyword, function(data, status) {
+            if (status === kakao.maps.services.Status.OK) {
+                const mapBounds = new kakao.maps.LatLngBounds();
+                for (let i = 0; i < data.length; i++) {
+                    createPhotoBoothMarker(data[i]);
+                    mapBounds.extend(new kakao.maps.LatLng(data[i].y, data[i].x));
+                }
+                map.setBounds(mapBounds); // 검색 결과가 다 보이게 화면 자동 피팅
+            } else {
+                alert('검색 결과가 없습니다.');
             }
-
-            // [핵심] 검색된 포토부스 매장들이 전부 다 화면에 보이도록 지도를 자동으로 이동 및 확대/축소 시켜줘!
-            map.setBounds(mapBounds);
-
-        } else if (status === kakao.maps.services.Status.ZERO_RESULT) {
-            alert('검색 결과가 없습니다. 오타가 없는지 확인해 보거나 다른 지역명으로 검색해 보세요!');
-        } else if (status === kakao.maps.services.Status.ERROR) {
-            alert('장소 검색 중 알 수 없는 시스템 오류가 발생했습니다.');
-        }
+        });
     }
 
-    // 포토부스 매장 마커 및 대기 인원 팝업 생성 함수
+    // 마커 및 정보창(대기 인원 포함) 생성 공용 팩토리 함수
     function createPhotoBoothMarker(place) {
         const markerPosition = new kakao.maps.LatLng(place.y, place.x);
         
-        // 마커 생성
         const marker = new kakao.maps.Marker({
             map: map,
             position: markerPosition
         });
 
-        // 다음 검색 때 지울 수 있도록 배열에 보관
         currentMarkers.push(marker);
 
-        // 기획서 기능 3: 대기 인원 랜덤 가상 생성 (0~4팀)
+        // 기획서 기능 3: 가상 대기팀 생성
         const waitingTeams = Math.floor(Math.random() * 5); 
 
-        // 인포윈도우 내용 레이아웃 구성 (가게 주소 정보 추가하여 가독성 업그레이드)
         const infoContent = `
             <div class="info-window">
                 <div class="info-title">${place.place_name}</div>
@@ -202,10 +292,9 @@
 
         const infowindow = new kakao.maps.InfoWindow({
             content: infoContent,
-            removable: true // 정보창 우측 상단에 닫기(X) 버튼 활성화
+            removable: true 
         });
 
-        // 마커 클릭 시 정보창 열기 이벤트 등록
         kakao.maps.event.addListener(marker, 'click', function() {
             if (activeInfoWindow) {
                 activeInfoWindow.close();
@@ -213,9 +302,11 @@
             infowindow.open(map, marker);
             activeInfoWindow = infowindow; 
         });
+
+        return marker; // 생성된 마커 인스턴스 반환 (클릭 이벤트 연결용)
     }
 
-    // 기존 마커들을 지도에서 일괄 삭제하는 함수
+    // 마커 리셋 함수
     function clearMarkers() {
         for (let i = 0; i < currentMarkers.length; i++) {
             currentMarkers[i].setMap(null);
